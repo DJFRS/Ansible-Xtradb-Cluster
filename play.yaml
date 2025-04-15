@@ -18,15 +18,19 @@
         - lsb-release
         - curl
         - python3-pip
+        - python3-pymysql
 
-    - name: Download and install Percona repository
-      shell: |
-        wget https://repo.percona.com/apt/percona-release_latest.generic_all.deb
-        dpkg -i percona-release_latest.generic_all.deb
-        pip3 install pymysql
+    - name: Download "percona-release_latest"
+      get_url:
+        url: "https://repo.percona.com/apt/percona-release_latest.generic_all.deb"
+        dest: "/tmp/percona-release_latest.generic_all.deb"
 
-      args:
-        chdir: /tmp
+    - name: Install the "percona-release_latest"
+      command:
+        cmd: "dpkg -i /tmp/percona-release_latest.generic_all.deb"
+      register: dpkg_result
+      changed_when: dpkg_result.rc == 0
+      failed_when: dpkg_result.rc != 0 and 'already installed' not in dpkg_result.stderr
 
     - name: Update package cache after adding Percona repository
       apt:
@@ -43,9 +47,6 @@
         src: my.cnf.j2
         dest: /etc/mysql/mysql.conf.d/mysqld.cnf
 
-
-
-
 - name: Bootstrap nodes and joining to the cluster
   hosts: database_nodes
   become: yes
@@ -61,10 +62,9 @@
     - name: Update safe_to_bootstrap value in grastate.dat
       replace:
         path: /var/lib/mysql/grastate.dat
-        regexp: '^safe_to_bootstrap: 0$'
-        replace: 'safe_to_bootstrap: 1'
+        regexp: "^safe_to_bootstrap: 0$"
+        replace: "safe_to_bootstrap: 1"
       when: inventory_hostname == groups['database_nodes'] | first
-
 
     - name: Start Bootstrap service on the first node
       command: systemctl start mysql@bootstrap.service
@@ -97,12 +97,9 @@
         password: "{{ passwords.mysql_root_password }}"
         login_unix_socket: /var/run/mysqld/mysqld.sock
         login_user: root
-        login_password: ""  # Empty password for the initial connection
+        login_password: "{{ passwords.mysql_root_password }}" # Empty password for the initial connection
         state: present
       when: inventory_hostname == groups['database_nodes'] | first
-
-
-
 
 - name: Install Proxysql
   hosts: proxysql_nodes
@@ -122,16 +119,19 @@
         - lsb-release
         - curl
         - python3-pip
+        - python3-pymysql
 
-    - name: Download and install Percona repository
-      shell: |
-        wget https://repo.percona.com/apt/percona-release_latest.generic_all.deb
-        dpkg -i percona-release_latest.generic_all.deb
-        pip3 install pymysql
+    - name: Download "percona-release_latest"
+      get_url:
+        url: "https://repo.percona.com/apt/percona-release_latest.generic_all.deb"
+        dest: "/tmp/percona-release_latest.generic_all.deb"
 
-
-      args:
-        chdir: /tmp
+    - name: Install the "percona-release_latest"
+      command:
+        cmd: "dpkg -i /tmp/percona-release_latest.generic_all.deb"
+      register: dpkg_result
+      changed_when: dpkg_result.rc == 0
+      failed_when: dpkg_result.rc != 0 and 'already installed' not in dpkg_result.stderr
 
     - name: Update package cache
       apt:
@@ -139,7 +139,6 @@
 
     - name: Enable the release repository for Percona XtraDB Cluster
       shell: percona-release setup pxc80
-
 
     - name: Install Percona XtraDB Cluster client
       apt:
@@ -151,9 +150,6 @@
         name: proxysql2
         state: present
 
-
-
-
 - name: configure proxysql nodes
   hosts: database_nodes
   become: yes
@@ -161,7 +157,6 @@
     passwords_file: "password.yaml"
 
   tasks:
-
     - name: Include passwords from file
       include_vars:
         file: "{{ passwords_file }}"
@@ -174,7 +169,7 @@
         host: "%"
         priv: "*.*:ALL"
         login_user: root
-        login_password:  "{{ passwords.mysql_root_password }}"
+        login_password: "{{ passwords.mysql_root_password }}"
         state: present
       loop_control:
         loop_var: item
@@ -194,8 +189,32 @@
       loop: "{{ groups['database_nodes'] }}"
       when: item == groups['database_nodes'] | first
 
+    - name: Create monitor user
+      mysql_user:
+        name: monitor
+        password: monitor
+        host: "%"
+        priv: "*.*:ALL"
+        login_user: root
+        login_password: "{{ passwords.mysql_root_password }}"
+        state: present
+      loop_control:
+        loop_var: item
+      loop: "{{ groups['database_nodes'] }}"
+      when: item == groups['database_nodes'] | first
 
-
+    - name: Grant privileges to monitor user
+      mysql_user:
+        name: monitor
+        priv: "*.*:ALL"
+        host: "%"
+        login_user: root
+        login_password: "{{ passwords.mysql_root_password }}"
+        state: present
+      loop_control:
+        loop_var: item
+      loop: "{{ groups['database_nodes'] }}"
+      when: item == groups['database_nodes'] | first
 
 - name: configure proxysql nodes
   hosts: proxysql_nodes
@@ -204,7 +223,6 @@
     passwords_file: "password.yaml"
 
   tasks:
-
     - name: Include passwords from file
       include_vars:
         file: "{{ passwords_file }}"
